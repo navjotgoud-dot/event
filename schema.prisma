@@ -1,0 +1,661 @@
+// Business Plan Championship Platform - Database Schema
+// Compatible with Neon PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ AUTH & USERS ============
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String?
+  name          String
+  phone         String?
+  image         String?
+  emailVerified DateTime?
+  role          Role      @default(PARTICIPANT)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  participant   Participant?
+  teamMembers   TeamMember[]
+  judgeProfile  Judge?
+  reviewerAssignments ReviewerAssignment[]
+  auditLogs     AuditLog[]
+  feedbackResponses FeedbackResponse[]
+  certificates  Certificate[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum Role {
+  SUPER_ADMIN
+  CHAMPIONSHIP_DIRECTOR
+  COMPETITION_MANAGER
+  JUDGE
+  REVIEWER
+  PARTICIPANT
+  SPEAKER_MENTOR_MANAGER
+  GUEST_RELATIONS
+  REGISTRATION_MANAGER
+  VOLUNTEER
+  MARKETING
+  CUSTOM
+}
+
+// ============ CHAMPIONSHIP SETTINGS ============
+
+model Championship {
+  id              String   @id @default(cuid())
+  name            String
+  tagline         String?
+  edition         String?
+  overview        String?  @db.Text
+  theme           String?
+  logoUrl         String?
+  bannerUrl       String?
+  primaryColor    String   @default("#0c8ee6")
+  secondaryColor  String   @default("#dc8f22")
+  eventStartDate  DateTime?
+  eventEndDate    DateTime?
+  applicationOpen DateTime?
+  applicationClose DateTime?
+  screeningDate   DateTime?
+  finalistAnnounceDate DateTime?
+  timezone        String   @default("Asia/Kolkata")
+  venueName       String?
+  venueAddress    String?  @db.Text
+  venueMapUrl     String?
+  contactEmail    String?
+  contactPhone    String?
+  organizerName   String?
+  organizerWebsite String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tracks          Track[]
+  pages           EventPage[]
+  awards          Award[]
+  ticketTypes     TicketType[]
+  agendaSessions  AgendaSession[]
+  settings        ChampionshipSetting[]
+}
+
+model ChampionshipSetting {
+  id             String      @id @default(cuid())
+  championshipId String
+  key            String
+  value          String      @db.Text
+  championship   Championship @relation(fields: [championshipId], references: [id], onDelete: Cascade)
+
+  @@unique([championshipId, key])
+}
+
+model Track {
+  id             String   @id @default(cuid())
+  championshipId String
+  name           String
+  description    String?  @db.Text
+  color          String?
+  maxTeams       Int?
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  championship   Championship @relation(fields: [championshipId], references: [id], onDelete: Cascade)
+  applications   Application[]
+  awards         Award[]
+
+  @@index([championshipId])
+}
+
+model EventPage {
+  id             String   @id @default(cuid())
+  championshipId String
+  slug           String
+  title          String
+  content        String?  @db.Text
+  isPublished    Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  metaTitle      String?
+  metaDescription String?
+  championship   Championship @relation(fields: [championshipId], references: [id], onDelete: Cascade)
+  sections       EventSection[]
+
+  @@unique([championshipId, slug])
+}
+
+model EventSection {
+  id        String    @id @default(cuid())
+  pageId    String
+  type      String    // hero, text, cards, gallery, cta, etc.
+  title     String?
+  content   String?   @db.Text
+  imageUrl  String?
+  config    String?   @db.Text // JSON config
+  sortOrder Int       @default(0)
+  isVisible Boolean   @default(true)
+  page      EventPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+}
+
+// ============ PARTICIPANTS & TEAMS ============
+
+model Participant {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  fullName        String
+  email           String
+  phone           String?
+  city            String?
+  institution     String?
+  designation     String?
+  age             Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamMembers     TeamMember[]
+  applications    Application[]
+}
+
+model Team {
+  id              String   @id @default(cuid())
+  name            String
+  applicationId   String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  members         TeamMember[]
+  application     Application?
+}
+
+model TeamMember {
+  id            String   @id @default(cuid())
+  teamId        String
+  userId        String?
+  participantId String?
+  fullName      String
+  email         String
+  phone         String?
+  role          String   @default("MEMBER") // LEADER, MEMBER
+  designation   String?
+  institution   String?
+  isLeader      Boolean  @default(false)
+  team          Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user          User?    @relation(fields: [userId], references: [id])
+  participant   Participant? @relation(fields: [participantId], references: [id])
+
+  @@index([teamId])
+}
+
+// ============ APPLICATIONS & SUBMISSIONS ============
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  CLARIFICATION_REQUIRED
+  SHORTLISTED
+  WAITLISTED
+  NOT_SELECTED
+  FINALIST
+  WITHDRAWN
+}
+
+model Application {
+  id              String            @id @default(cuid())
+  applicationId   String            @unique // human readable e.g. BPC-2025-0001
+  participantId   String?
+  teamId          String?           @unique
+  trackId         String?
+  status          ApplicationStatus @default(DRAFT)
+  businessName    String?
+  businessStage   String?
+  ideaSummary     String?           @db.Text
+  problemStatement String?          @db.Text
+  targetCustomer  String?           @db.Text
+  submittedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  participant     Participant?      @relation(fields: [participantId], references: [id])
+  team            Team?             @relation(fields: [teamId], references: [id])
+  track           Track?            @relation(fields: [trackId], references: [id])
+  answers         ApplicationAnswer[]
+  businessPlan    BusinessPlan?
+  pitchDeck       PitchDeck?
+  screeningScores ScreeningScore[]
+  reviewerAssignments ReviewerAssignment[]
+  judgeScores     JudgeScore[]
+  pitchSlot       PitchSlot?
+  feedbackResponses FeedbackResponse[]
+
+  @@index([status])
+  @@index([trackId])
+  @@index([applicationId])
+}
+
+model ApplicationAnswer {
+  id            String      @id @default(cuid())
+  applicationId String
+  questionKey   String
+  answer        String      @db.Text
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, questionKey])
+}
+
+model BusinessPlan {
+  id            String   @id @default(cuid())
+  applicationId String   @unique
+  fileName      String
+  fileUrl       String
+  fileSize      Int?
+  mimeType      String?
+  version       Int      @default(1)
+  uploadedAt    DateTime @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model PitchDeck {
+  id            String   @id @default(cuid())
+  applicationId String   @unique
+  fileName      String
+  fileUrl       String
+  fileSize      Int?
+  mimeType      String?
+  version       Int      @default(1)
+  uploadedAt    DateTime @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+// ============ SCREENING ============
+
+model ReviewerAssignment {
+  id            String   @id @default(cuid())
+  applicationId String
+  reviewerId    String
+  assignedAt    DateTime @default(now())
+  completedAt   DateTime?
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewer      User     @relation(fields: [reviewerId], references: [id])
+
+  @@unique([applicationId, reviewerId])
+}
+
+model ScreeningScore {
+  id            String   @id @default(cuid())
+  applicationId String
+  reviewerId    String
+  criterion     String
+  score         Float
+  maxScore      Float    @default(10)
+  comments      String?  @db.Text
+  createdAt     DateTime @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+// ============ JUDGING ============
+
+model Judge {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  designation   String?
+  organization  String?
+  biography     String?  @db.Text
+  expertise     String?
+  photoUrl      String?
+  isActive      Boolean  @default(true)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignments   JudgeAssignment[]
+  scores        JudgeScore[]
+}
+
+model JudgeAssignment {
+  id        String   @id @default(cuid())
+  judgeId   String
+  trackId   String?
+  roundId   String?
+  judge     Judge    @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+}
+
+model JudgingRubric {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  criteria    RubricCriterion[]
+}
+
+model RubricCriterion {
+  id          String        @id @default(cuid())
+  rubricId    String
+  name        String
+  description String?
+  weight      Float         // percentage
+  maxScore    Float         @default(10)
+  sortOrder   Int           @default(0)
+  rubric      JudgingRubric @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+}
+
+model JudgeScore {
+  id            String   @id @default(cuid())
+  applicationId String
+  judgeId       String
+  criterion     String
+  score         Float
+  maxScore      Float    @default(10)
+  feedback      String?  @db.Text
+  isLocked      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  judge         Judge    @relation(fields: [judgeId], references: [id])
+
+  @@unique([applicationId, judgeId, criterion])
+  @@index([applicationId])
+}
+
+// ============ PITCH & AGENDA ============
+
+model PitchRound {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  date        DateTime?
+  pitchDuration Int    @default(8) // minutes
+  qaDuration  Int      @default(5)
+  isActive    Boolean  @default(true)
+  slots       PitchSlot[]
+}
+
+model PitchSlot {
+  id            String   @id @default(cuid())
+  roundId       String
+  applicationId String   @unique
+  slotNumber    Int
+  scheduledAt   DateTime?
+  room          String?
+  status        String   @default("SCHEDULED")
+  round         PitchRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  application   Application @relation(fields: [applicationId], references: [id])
+}
+
+model AgendaSession {
+  id             String   @id @default(cuid())
+  championshipId String
+  day            Int      // 1 or 2
+  title          String
+  description    String?  @db.Text
+  sessionType    String?  // keynote, panel, pitch, networking, etc.
+  startTime      DateTime?
+  endTime        DateTime?
+  room           String?
+  speakerIds     String?  // comma-separated or JSON
+  sortOrder      Int      @default(0)
+  championship   Championship @relation(fields: [championshipId], references: [id], onDelete: Cascade)
+}
+
+// ============ SPEAKERS, MENTORS, INVESTORS ============
+
+model Speaker {
+  id            String   @id @default(cuid())
+  name          String
+  designation   String?
+  organization  String?
+  biography     String?  @db.Text
+  expertise     String?
+  photoUrl      String?
+  sessionTitle  String?
+  sessionTopic  String?
+  isConfirmed   Boolean  @default(false)
+  sortOrder     Int      @default(0)
+}
+
+model Mentor {
+  id            String   @id @default(cuid())
+  name          String
+  designation   String?
+  organization  String?
+  biography     String?  @db.Text
+  expertise     String?
+  photoUrl      String?
+  isAvailable   Boolean  @default(true)
+}
+
+model Investor {
+  id            String   @id @default(cuid())
+  name          String
+  organization  String?
+  industry      String?
+  role          String?
+  areasOfInterest String? @db.Text
+  photoUrl      String?
+  isConfirmed   Boolean  @default(false)
+}
+
+// ============ TICKETING ============
+
+model TicketType {
+  id             String   @id @default(cuid())
+  championshipId String
+  name           String
+  description    String?
+  price          Float    @default(0)
+  currency       String   @default("INR")
+  quantity       Int?
+  soldCount      Int      @default(0)
+  salesOpen      DateTime?
+  salesClose     DateTime?
+  isActive       Boolean  @default(true)
+  championship   Championship @relation(fields: [championshipId], references: [id], onDelete: Cascade)
+  tickets        Ticket[]
+}
+
+model Ticket {
+  id            String   @id @default(cuid())
+  ticketNumber  String   @unique
+  ticketTypeId  String
+  holderName    String
+  holderEmail   String
+  holderPhone   String?
+  qrToken       String   @unique
+  status        String   @default("VALID") // VALID, USED, CANCELLED
+  checkedInAt   DateTime?
+  createdAt     DateTime @default(now())
+  ticketType    TicketType @relation(fields: [ticketTypeId], references: [id])
+  checkIns      CheckIn[]
+
+  @@index([qrToken])
+}
+
+model CheckIn {
+  id          String   @id @default(cuid())
+  ticketId    String
+  checkedInAt DateTime @default(now())
+  checkedInBy String?
+  location    String?
+  ticket      Ticket   @relation(fields: [ticketId], references: [id])
+}
+
+// ============ AWARDS & CERTIFICATES ============
+
+model Award {
+  id             String   @id @default(cuid())
+  championshipId String
+  trackId        String?
+  name           String
+  description    String?
+  prizeDetails   String?  @db.Text
+  sortOrder      Int      @default(0)
+  championship   Championship @relation(fields: [championshipId], references: [id], onDelete: Cascade)
+  track          Track?   @relation(fields: [trackId], references: [id])
+  winners        Winner[]
+}
+
+model Winner {
+  id            String   @id @default(cuid())
+  awardId       String
+  applicationId String?
+  teamName      String?
+  rank          Int?
+  announcedAt   DateTime?
+  award         Award    @relation(fields: [awardId], references: [id], onDelete: Cascade)
+}
+
+model Certificate {
+  id              String   @id @default(cuid())
+  userId          String?
+  recipientName   String
+  certificateType String   // PARTICIPATION, FINALIST, WINNER, JUDGE, etc.
+  verificationId  String   @unique
+  issuedAt        DateTime @default(now())
+  isRevoked       Boolean  @default(false)
+  user            User?    @relation(fields: [userId], references: [id])
+}
+
+// ============ FEEDBACK & FOLLOW-UP ============
+
+model FeedbackForm {
+  id          String   @id @default(cuid())
+  name        String
+  targetRole  String   // PARTICIPANT, AUDIENCE, JUDGE, etc.
+  questions   String   @db.Text // JSON
+  isActive    Boolean  @default(true)
+  responses   FeedbackResponse[]
+}
+
+model FeedbackResponse {
+  id            String   @id @default(cuid())
+  formId        String
+  userId        String?
+  applicationId String?
+  answers       String   @db.Text // JSON
+  rating        Float?
+  comments      String?  @db.Text
+  isAnonymous   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  form          FeedbackForm @relation(fields: [formId], references: [id])
+  user          User?    @relation(fields: [userId], references: [id])
+  application   Application? @relation(fields: [applicationId], references: [id])
+}
+
+model FollowUpCase {
+  id            String   @id @default(cuid())
+  applicationId String?
+  teamName      String?
+  contactName   String?
+  contactEmail  String?
+  requestType   String   // MENTORSHIP, INTRODUCTION, INCUBATION, etc.
+  status        String   @default("NEW") // NEW, CONTACTED, MEETING_SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED
+  notes         String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============ SPOCS & ORGANIZING ============
+
+model Spoc {
+  id            String   @id @default(cuid())
+  name          String
+  designation   String?
+  department    String?
+  email         String?
+  phone         String?
+  whatsapp      String?
+  photoUrl      String?
+  responsibility String?
+  isActive      Boolean  @default(true)
+  assignments   SpocAssignment[]
+}
+
+model SpocAssignment {
+  id          String   @id @default(cuid())
+  spocId      String
+  category    String   // PARTICIPANT, JUDGE, SPEAKER, etc.
+  trackId     String?
+  notes       String?
+  spoc        Spoc     @relation(fields: [spocId], references: [id], onDelete: Cascade)
+}
+
+// ============ EMAIL ============
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  bodyHtml    String   @db.Text
+  bodyText    String?  @db.Text
+  variables   String?  // JSON list of available variables
+  isActive    Boolean  @default(true)
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  toEmail     String
+  subject     String
+  templateId  String?
+  status      String   // SENT, DELIVERED, BOUNCED, FAILED
+  providerId  String?
+  sentAt      DateTime @default(now())
+  error       String?
+}
+
+// ============ AUDIT ============
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  entityType  String?
+  entityId    String?
+  details     String?  @db.Text
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+}
